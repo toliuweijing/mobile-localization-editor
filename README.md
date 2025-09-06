@@ -8,6 +8,14 @@ A web-based tool designed to streamline the painful process of managing localiza
 
 ---
 
+## 🚨 Important Note (Alpha v0.1)
+
+This project is currently in an early alpha stage. The initial focus was on building a robust workflow for **Android (`strings.xml`) first**, with iOS support added subsequently. While both platforms are supported, there may be bugs or rough edges.
+
+**[➡️ Try it out here!](https://mobile-localization-editor-1020602569703.us-west1.run.app/)**
+
+---
+
 ## ✨ Features
 
 *   **Cross-Platform Support:** Natively import, edit, and export for both Android (`strings.xml`) and iOS (`.strings`).
