@@ -1,0 +1,5 @@
+{
+  "name": "Mobile Localization Editor",
+  "description": "An application to import Android (strings.xml) or iOS (.strings) localization files and convert them into a user-friendly table format for editing and translation.",
+  "requestFramePermissions": []
+}
