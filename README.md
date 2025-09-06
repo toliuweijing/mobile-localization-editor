@@ -2,7 +2,7 @@
 
 > A modern, offline-first, AI-powered localization editor for Android and iOS projects.
 
-![A screenshot of the Mobile Localization Editor showing the project sidebar, the main resource table with multiple language columns, and the merge review modal.](https://storage.googleapis.com/aistudio-programmable-ui-project-assets/gallery_images/localization-editor-screenshot.png)
+<img width="1452" height="782" alt="Screenshot 2025-09-07 at 07 28 12" src="https://github.com/user-attachments/assets/9f8b7e31-cb98-4e70-b0f6-c1c5f4ff70d6" />
 
 A web-based tool designed to streamline the painful process of managing localization files. Import your `strings.xml` (Android) or `.strings` (iOS) files, edit them in a clean table-based UI, add translations with AI assistance, and export them back, ready for your mobile project.
 
