@@ -1,6 +1,7 @@
+
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
-import { StringResource, Project, Platform, MergeComparison, MergeResolutions, UpdateDiff, ValueChange } from './types';
+import { StringResource, Project, Platform, MergeComparison, MergeResolutions, UpdateDiff, ValueChange, LanguageMappingRequest, LanguageMappingResolution } from './types';
 import { getAllProjects, saveProject, deleteProject, clearAllProjects, bulkSaveProjects } from './services/database';
 import FileUpload from './components/FileUpload';
 import ResourceTable from './components/ResourceTable';
@@ -10,21 +11,30 @@ import Sidebar from './components/Sidebar';
 import MenuIcon from './components/icons/MenuIcon';
 import RefreshIcon from './components/icons/RefreshIcon';
 import MergeReviewModal from './components/MergeReviewModal';
+import LanguageMappingModal from './components/LanguageMappingModal';
+import UploadIcon from './components/icons/UploadIcon';
+import CheckIcon from './components/icons/CheckIcon';
 
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [isDirty, setIsDirty] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [aiTranslating, setAiTranslating] = useState<{ [langCode: string]: boolean }>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mergeComparison, setMergeComparison] = useState<MergeComparison | null>(null);
-  const updateFileInputRef = useRef<HTMLInputElement>(null);
+  const [languageMappingRequest, setLanguageMappingRequest] = useState<LanguageMappingRequest | null>(null);
+  const sourceUpdateFileInputRef = useRef<HTMLInputElement>(null);
+  const translationUpdateFileInputRef = useRef<HTMLInputElement>(null);
 
   const activeProject = useMemo(() => {
     return projects.find(p => p.id === activeProjectId) || null;
   }, [projects, activeProjectId]);
   
+  const hasPendingChanges = useMemo(() => {
+    if (!activeProject) return false;
+    return activeProject.resources.some(r => r.status === 'new' || r.status === 'updated');
+  }, [activeProject]);
+
   // Load projects from IndexedDB on initial render
   useEffect(() => {
     const loadProjects = async () => {
@@ -63,7 +73,6 @@ const App: React.FC = () => {
           setError("Failed to save changes to the database.");
       });
     }
-    setIsDirty(true);
   }, [activeProjectId]);
 
 
@@ -140,36 +149,36 @@ const App: React.FC = () => {
     return parsedResources;
   };
 
-  const parseCsvContent = (csvString: string): { headers: string[], rows: { [key: string]: string }[] } => {
-    const parseCsvRow = (row: string): string[] => {
-        const result: string[] = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < row.length; i++) {
-            const char = row[i];
-            if (char === '"') {
-                if (inQuotes && row[i + 1] === '"') {
-                    current += '"';
-                    i++; // Skip the second quote
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === ',' && !inQuotes) {
-                result.push(current.trim());
-                current = '';
+  const parseCsvRow = (row: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+        const char = row[i];
+        if (char === '"') {
+            if (inQuotes && row[i + 1] === '"') {
+                current += '"';
+                i++; // Skip the second quote
             } else {
-                current += char;
+                inQuotes = !inQuotes;
             }
+        } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+        } else {
+            current += char;
         }
-        result.push(current.trim());
-        return result.map(val => {
-            if (val.startsWith('"') && val.endsWith('"')) {
-                return val.slice(1, -1).replace(/""/g, '"');
-            }
-            return val;
-        });
-    };
+    }
+    result.push(current.trim());
+    return result.map(val => {
+        if (val.startsWith('"') && val.endsWith('"')) {
+            return val.slice(1, -1).replace(/""/g, '"');
+        }
+        return val;
+    });
+  };
 
+  const parseCsvContent = (csvString: string): { headers: string[], rows: { [key: string]: string }[] } => {
     const lines = csvString.replace(/\r\n/g, '\n').split('\n');
     if (lines.length < 1) return { headers: [], rows: [] };
 
@@ -253,30 +262,113 @@ const App: React.FC = () => {
     reader.readAsText(file);
   }, [activeProjectId, updateActiveProject]);
 
-  const handleFileUpdateRequest = (file: File) => {
-    if (!activeProject) return;
-    const isCsv = file.name.endsWith('.csv');
+  const handleSourceFileUpdate = (file: File) => {
+     if (!activeProject) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        handleProcessFileUpdate(file, {});
+      } catch (e: unknown) {
+        if (e instanceof Error) {
+            setError(e.message);
+        } else {
+            setError('An unknown error occurred during update analysis.');
+        }
+      }
+    };
+    reader.onerror = () => {
+        setError('Failed to read the update file.');
+    };
+    reader.readAsText(file);
+  };
 
+  const handleTranslationFileUpdate = (file: File) => {
+     if (!activeProject) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const content = event.target?.result as string;
+            // Phase 1: CSV Header Analysis
+            const lines = content.replace(/\r\n/g, '\n').split('\n');
+            if (lines.length < 1) throw new Error("CSV is empty.");
+            const headers = parseCsvRow(lines[0]);
+            
+            const newLanguages: string[] = [];
+            const unrecognizedColumns: string[] = [];
+
+            for (const header of headers) {
+                if (header === 'id' || header === 'context') continue;
+
+                if (header.startsWith('value_')) {
+                    const langCode = header.substring('value_'.length);
+                    if (!activeProject.languages.includes(langCode)) {
+                        newLanguages.push(langCode);
+                    }
+                } else {
+                    unrecognizedColumns.push(header);
+                }
+            }
+
+            if (newLanguages.length > 0 || unrecognizedColumns.length > 0) {
+                setLanguageMappingRequest({ newLanguages, unrecognizedColumns, file });
+                return; // Pause execution, wait for user input from modal
+            }
+            
+            // If CSV has no new/unrecognized languages, proceed directly.
+            handleProcessFileUpdate(file, {});
+
+        } catch (e: unknown) {
+            if (e instanceof Error) {
+                setError(e.message);
+            } else {
+                setError('An unknown error occurred during update analysis.');
+            }
+        }
+    };
+    reader.onerror = () => {
+        setError('Failed to read the update file.');
+    };
+    reader.readAsText(file);
+  }
+
+  const handleProcessFileUpdate = (file: File, resolutions: LanguageMappingResolution) => {
+    if (!activeProject) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const content = event.target?.result as string;
         let newResources: StringResource[];
+        const isCsv = file.name.endsWith('.csv');
 
         if (isCsv) {
             const { headers, rows } = parseCsvContent(content);
+            const headerMap: { [key: string]: string } = {}; // Maps original header to its purpose (e.g., 'value_fr')
+            
+            for(const header of headers) {
+                if (header.startsWith('value_')) {
+                    headerMap[header] = header;
+                } else if (resolutions[header]?.action === 'map') {
+                    const res = resolutions[header];
+                    if (res.action === 'map') {
+                        headerMap[header] = `value_${res.langCode}`;
+                    }
+                }
+            }
+
             newResources = rows.map(row => {
                 const id = row.id;
                 if (!id) return null;
                 const context = row.context || 'No context provided.';
                 const values: { [lang: string]: string } = {};
-                for (const header of headers) {
-                    if (header.startsWith('value_')) {
-                        const langCode = header.substring('value_'.length);
-                        values[langCode] = row[header] || '';
+                for (const originalHeader in headerMap) {
+                    const mappedHeader = headerMap[originalHeader];
+                    if (mappedHeader.startsWith('value_')) {
+                        const langCode = mappedHeader.substring('value_'.length);
+                        values[langCode] = row[originalHeader] || '';
                     }
                 }
-                // CSV doesn't have source text, so it's an empty string.
                 return { id, context, values, sourceText: '' };
             }).filter((r): r is StringResource => r !== null);
         } else {
@@ -300,9 +392,14 @@ const App: React.FC = () => {
                 const valueChanges: ValueChange[] = [];
                 let contextChange: UpdateDiff['contextChange'] = null;
                 
-                const allLangs = new Set([...Object.keys(oldResource.values), ...Object.keys(newResource.values)]);
+                let languagesToCompare: Set<string>;
+                if (isCsv) {
+                    languagesToCompare = new Set([...Object.keys(oldResource.values), ...Object.keys(newResource.values)]);
+                } else {
+                    languagesToCompare = new Set(Object.keys(newResource.values));
+                }
                 
-                for (const langCode of allLangs) {
+                for (const langCode of languagesToCompare) {
                   const oldValue = oldResource.values[langCode] || '';
                   const newValue = newResource.values[langCode] || '';
                   if (oldValue !== newValue) {
@@ -310,7 +407,6 @@ const App: React.FC = () => {
                   }
                 }
                 
-                // Context is only updated if the new resource provides it (not guaranteed for CSVs without the column)
                 if (newResource.context !== undefined && oldResource.context !== newResource.context) {
                     contextChange = { oldContext: oldResource.context, newContext: newResource.context };
                 }
@@ -353,6 +449,7 @@ const App: React.FC = () => {
 
     updateActiveProject(proj => {
         const resourcesMap = new Map(proj.resources.map(r => [r.id, { ...r }]));
+        let allLangs = new Set(proj.languages);
 
         // Process removals
         for (const res of mergeComparison.removed) {
@@ -374,6 +471,7 @@ const App: React.FC = () => {
                     const newValues = { ...existing.values };
                     update.valueChanges.forEach(change => {
                         newValues[change.langCode] = change.newValue;
+                        allLangs.add(change.langCode);
                     });
 
                     resourcesMap.set(update.id, {
@@ -391,16 +489,17 @@ const App: React.FC = () => {
         // Process additions
         for (const newRes of mergeComparison.added) {
             resourcesMap.set(newRes.id, { ...newRes, status: 'new' });
+            Object.keys(newRes.values).forEach(lang => allLangs.add(lang));
         }
 
         return {
             ...proj,
             resources: Array.from(resourcesMap.values()),
+            languages: Array.from(allLangs),
             lastModified: Date.now(),
         };
     });
 
-    setIsDirty(true);
     setMergeComparison(null);
   };
 
@@ -427,9 +526,6 @@ const App: React.FC = () => {
   }, [updateActiveProject]);
 
   const handleNewProject = async () => {
-    if (isDirty && !window.confirm("You have unsaved changes. Are you sure you want to start a new project? Your changes will be lost.")) {
-      return;
-    }
     const newProject: Project = {
       id: `proj_${Date.now()}`,
       name: 'Untitled Project',
@@ -442,35 +538,11 @@ const App: React.FC = () => {
     await saveProject(newProject);
     setProjects(prev => [...prev, newProject]);
     setActiveProjectId(newProject.id);
-    setIsDirty(true); // Dirty because it's new and unsaved with a name
     setError(null);
-  };
-
-  const handleSaveProject = async () => {
-    if (!activeProject) return;
-    
-    let newName = activeProject.name;
-    if (newName === 'Untitled Project') {
-        newName = prompt("Enter a name for this project:", `Project - ${activeProject.fileName || 'New'}`) || 'Untitled Project';
-    }
-
-    const updatedProject = { ...activeProject, name: newName, lastModified: Date.now() };
-    await saveProject(updatedProject);
-
-    setProjects(prev => prev.map(p => 
-        p.id === activeProjectId 
-        ? updatedProject
-        : p
-    ));
-    setIsDirty(false);
   };
   
   const handleSelectProject = (projectId: string | null) => {
-    if (isDirty && !window.confirm("You have unsaved changes that will be lost. Are you sure you want to switch projects?")) {
-        return;
-    }
     setActiveProjectId(projectId);
-    setIsDirty(false);
     setError(null);
   };
 
@@ -480,7 +552,6 @@ const App: React.FC = () => {
         setProjects(prev => prev.filter(p => p.id !== projectId));
         if (activeProjectId === projectId) {
             setActiveProjectId(null);
-            setIsDirty(false);
         }
     }
   };
@@ -497,6 +568,35 @@ const App: React.FC = () => {
         );
     }
   }, [projects]);
+
+  const handleAcknowledgeChange = useCallback((resourceId: string) => {
+    updateActiveProject(proj => ({
+      ...proj,
+      resources: proj.resources.map(r => {
+        if (r.id === resourceId) {
+          const { status, ...rest } = r;
+          return rest as StringResource;
+        }
+        return r;
+      }),
+    }));
+  }, [updateActiveProject]);
+  
+  const handleAcknowledgeAllChanges = useCallback(() => {
+    if (!window.confirm("Are you sure you want to acknowledge all new and updated changes? This will remove their highlights.")) {
+        return;
+    }
+    updateActiveProject(proj => ({
+      ...proj,
+      resources: proj.resources.map(r => {
+        if (r.status) {
+          const { status, ...rest } = r;
+          return rest as StringResource;
+        }
+        return r;
+      }),
+    }));
+  }, [updateActiveProject]);
 
   const triggerDownload = (content: string, fileType: string, downloadName: string) => {
     const blob = new Blob([content], { type: fileType });
@@ -760,12 +860,6 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const getUpdateAcceptTypes = () => {
-    if (!activeProject) return '.xml,.strings,.csv';
-    const nativeType = activeProject.platform === 'android' ? '.xml' : '.strings';
-    return `${nativeType},.csv`;
-  };
-
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
       <Sidebar 
@@ -773,10 +867,8 @@ const App: React.FC = () => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onNewProject={handleNewProject}
-        onSaveProject={handleSaveProject}
         onDeleteProject={handleDeleteProject}
         onRenameProject={handleRenameProject}
-        isDirty={isDirty}
         isSidebarOpen={isSidebarOpen}
         onImportWorkspace={handleImportWorkspace}
         onExportWorkspace={handleExportWorkspace}
@@ -812,25 +904,55 @@ const App: React.FC = () => {
                           <span className="truncate" title={activeProject.fileName}>{activeProject.fileName}</span>
                           {activeProject.platform && <span className="ml-3 text-xs font-mono uppercase bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-2 py-1 rounded-full">{activeProject.platform}</span>}
                       </div>
-                      <div className="flex items-center justify-center gap-3">
+                      <div className="flex items-center justify-center flex-wrap gap-3">
+                          {hasPendingChanges && (
+                              <button
+                                  onClick={handleAcknowledgeAllChanges}
+                                  className="flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors"
+                                  title="Acknowledge all new and updated strings, removing their highlights."
+                              >
+                                  <CheckIcon className="w-5 h-5 mr-2" />
+                                  Acknowledge All
+                              </button>
+                          )}
                           <button
-                            onClick={() => updateFileInputRef.current?.click()}
+                            onClick={() => sourceUpdateFileInputRef.current?.click()}
                             className="flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors"
-                            title="Update from a new version of the source file or a CSV"
+                            title={`Update from a new version of the source file (${activeProject.platform === 'android' ? '.xml' : '.strings'})`}
                           >
                             <RefreshIcon className="w-5 h-5 mr-2" />
-                            Update from File...
+                            Update Source
                           </button>
                           <input
                             type="file"
-                            ref={updateFileInputRef}
+                            ref={sourceUpdateFileInputRef}
                             className="hidden"
-                            accept={getUpdateAcceptTypes()}
+                            accept={activeProject.platform === 'android' ? '.xml' : '.strings'}
                             onChange={(e) => {
                                 if (e.target.files && e.target.files.length > 0) {
-                                    handleFileUpdateRequest(e.target.files[0]);
+                                    handleSourceFileUpdate(e.target.files[0]);
                                 }
-                                if (e.target) e.target.value = ''; // Allow re-uploading same file
+                                if (e.target) e.target.value = '';
+                            }}
+                          />
+                          <button
+                            onClick={() => translationUpdateFileInputRef.current?.click()}
+                            className="flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors"
+                            title="Update translations from a CSV file"
+                          >
+                            <UploadIcon className="w-5 h-5 mr-2" />
+                            Update Translation
+                          </button>
+                          <input
+                            type="file"
+                            ref={translationUpdateFileInputRef}
+                            className="hidden"
+                            accept=".csv"
+                            onChange={(e) => {
+                                if (e.target.files && e.target.files.length > 0) {
+                                    handleTranslationFileUpdate(e.target.files[0]);
+                                }
+                                if (e.target) e.target.value = '';
                             }}
                           />
                           <button
@@ -880,6 +1002,7 @@ const App: React.FC = () => {
                         onAiTranslate={handleAiTranslate}
                         aiTranslating={aiTranslating}
                         platform={activeProject.platform}
+                        onAcknowledgeChange={handleAcknowledgeChange}
                     />
                   </div>
                 ) : (
@@ -888,6 +1011,17 @@ const App: React.FC = () => {
               </>
             )}
         </main>
+        {languageMappingRequest && (
+            <LanguageMappingModal
+                request={languageMappingRequest}
+                onClose={() => setLanguageMappingRequest(null)}
+                onConfirm={(resolutions) => {
+                    const file = languageMappingRequest.file;
+                    setLanguageMappingRequest(null);
+                    handleProcessFileUpdate(file, resolutions);
+                }}
+            />
+        )}
         {mergeComparison && (
             <MergeReviewModal 
                 comparison={mergeComparison}

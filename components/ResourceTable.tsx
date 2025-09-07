@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { StringResource } from '../types';
 import TrashIcon from './icons/TrashIcon';
@@ -5,6 +6,7 @@ import SparkleIcon from './icons/SparkleIcon';
 import LoaderIcon from './icons/LoaderIcon';
 import CodeIcon from './icons/CodeIcon';
 import SourceViewModal from './SourceViewModal';
+import CheckIcon from './icons/CheckIcon';
 
 
 interface ResourceTableProps {
@@ -15,9 +17,10 @@ interface ResourceTableProps {
   onAiTranslate: (langCode: string) => void;
   aiTranslating: { [langCode: string]: boolean };
   platform: 'android' | 'ios' | null;
+  onAcknowledgeChange: (id: string) => void;
 }
 
-const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onUpdateResource, onRemoveLanguage, onAiTranslate, aiTranslating, platform }) => {
+const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onUpdateResource, onRemoveLanguage, onAiTranslate, aiTranslating, platform, onAcknowledgeChange }) => {
   const [selectedResource, setSelectedResource] = useState<StringResource | null>(null);
 
   const visibleResources = useMemo(() => resources.filter(r => !r.isArchived), [resources]);
@@ -100,14 +103,26 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
                     <td className={stickyTdClass}>
                       <div className="flex items-center justify-between gap-4">
                           <span className="truncate" title={resource.id}>{resource.id}</span>
-                          <button
-                              onClick={() => setSelectedResource(resource)}
-                              title="View original source"
-                              aria-label={`View original source for ${resource.id}`}
-                              className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                          >
-                              <CodeIcon className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center">
+                            {resource.status && (
+                                <button
+                                    onClick={() => onAcknowledgeChange(resource.id)}
+                                    title="Acknowledge change"
+                                    aria-label={`Acknowledge change for ${resource.id}`}
+                                    className="p-1.5 rounded-full text-slate-400 hover:bg-green-100 hover:text-green-600 dark:hover:bg-green-700 dark:hover:text-green-300 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                >
+                                    <CheckIcon className="w-4 h-4" />
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setSelectedResource(resource)}
+                                title="View original source"
+                                aria-label={`View original source for ${resource.id}`}
+                                className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            >
+                                <CodeIcon className="w-4 h-4" />
+                            </button>
+                          </div>
                       </div>
                     </td>
                     <td

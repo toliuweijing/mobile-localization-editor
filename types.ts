@@ -47,3 +47,14 @@ export interface MergeResolutions {
   updates: { [id: string]: 'keep' | 'update' };
   removals: { [id: string]: 'keep' | 'delete' };
 }
+
+// For CSV header analysis
+export interface LanguageMappingRequest {
+  newLanguages: string[]; // Valid new language codes like 'fr'
+  unrecognizedColumns: string[]; // Headers like 'French Translation'
+  file: File; // Keep the file handle for processing later
+}
+
+export interface LanguageMappingResolution {
+  [unrecognizedColumn: string]: { action: 'map', langCode: string } | { action: 'ignore' };
+}

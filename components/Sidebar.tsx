@@ -1,6 +1,6 @@
+
 import React from 'react';
 import NewFileIcon from './icons/NewFileIcon';
-import SaveIcon from './icons/SaveIcon';
 import TrashIcon from './icons/TrashIcon';
 import UploadIcon from './icons/UploadIcon';
 import DownloadIcon from './icons/DownloadIcon';
@@ -15,10 +15,8 @@ interface Project {
 interface SidebarProps {
   projects: Project[];
   activeProjectId: string | null;
-  isDirty: boolean;
   onSelectProject: (id: string) => void;
   onNewProject: () => void;
-  onSaveProject: () => void;
   onDeleteProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onImportWorkspace: (file: File) => void;
@@ -26,7 +24,7 @@ interface SidebarProps {
   isSidebarOpen: boolean;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ projects, activeProjectId, isDirty, onSelectProject, onNewProject, onSaveProject, onDeleteProject, onRenameProject, onImportWorkspace, onExportWorkspace, isSidebarOpen }) => {
+const Sidebar: React.FC<SidebarProps> = ({ projects, activeProjectId, onSelectProject, onNewProject, onDeleteProject, onRenameProject, onImportWorkspace, onExportWorkspace, isSidebarOpen }) => {
   const importInputRef = React.useRef<HTMLInputElement>(null);
   const sortedProjects = [...projects].sort((a, b) => b.lastModified - a.lastModified);
 
@@ -47,21 +45,13 @@ const Sidebar: React.FC<SidebarProps> = ({ projects, activeProjectId, isDirty, o
         <div className="p-4 border-b border-slate-200 dark:border-slate-700">
           <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Projects</h2>
         </div>
-        <div className="p-2 flex items-center gap-2 border-b border-slate-200 dark:border-slate-700">
+        <div className="p-2 border-b border-slate-200 dark:border-slate-700">
           <button
             onClick={onNewProject}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
           >
             <NewFileIcon className="w-4 h-4" />
-            New
-          </button>
-          <button
-            onClick={onSaveProject}
-            disabled={!isDirty || !activeProjectId}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-green-600 rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 dark:bg-green-500 dark:hover:bg-green-600 transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
-          >
-            <SaveIcon className="w-4 h-4" />
-            Save
+            New Project
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -110,7 +100,6 @@ const Sidebar: React.FC<SidebarProps> = ({ projects, activeProjectId, isDirty, o
                           >
                               {project.name}
                           </span>
-                          {project.id === activeProjectId && isDirty ? <span className="ml-1 text-red-400 font-bold">*</span> : ''}
                       </div>
                       <span className={`text-xs ${activeProjectId === project.id ? 'text-blue-200' : 'text-slate-400'}`}>
                         {new Date(project.lastModified).toLocaleDateString()}
