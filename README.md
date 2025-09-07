@@ -12,9 +12,14 @@ A web-based tool designed to streamline the painful process of managing localiza
 
 This project is currently in an early alpha stage. The initial focus was on building a robust workflow for **Android (`strings.xml`) first**, with iOS support added subsequently. While both platforms are supported, there may be bugs or rough edges.
 
+|AI-Powered Translation|
+|-|
+|![output](https://github.com/user-attachments/assets/18e85d29-324f-458b-81ab-71b11427740f)|
+
 **[➡️ Try it out here!](https://translator.innosage.co/)**
 
 ---
+
 
 ## ✨ Features
 
