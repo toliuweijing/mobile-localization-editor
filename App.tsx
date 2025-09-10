@@ -387,7 +387,10 @@ const App: React.FC = () => {
             handledNewIds.add(newResource.id);
             const oldResource = oldResourcesMap.get(newResource.id);
             if (!oldResource || oldResource.isArchived) { // Treat archived as new
-                added.push(newResource);
+                // If update is from CSV, do not add new strings. Source file is source of truth.
+                if (!isCsv) {
+                    added.push(newResource);
+                }
             } else {
                 const valueChanges: ValueChange[] = [];
                 let contextChange: UpdateDiff['contextChange'] = null;
@@ -421,7 +424,9 @@ const App: React.FC = () => {
             }
         }
 
-        const removed = activeProject.resources.filter(r => !handledNewIds.has(r.id) && !r.isArchived);
+        const removed = isCsv 
+            ? [] // If it's a CSV, never calculate removals. Source file is source of truth.
+            : activeProject.resources.filter(r => !handledNewIds.has(r.id) && !r.isArchived);
 
         if (added.length === 0 && updated.length === 0 && removed.length === 0) {
             alert("No changes detected in the new file.");
@@ -740,7 +745,17 @@ const App: React.FC = () => {
 
   const handleAiTranslate = useCallback(async (targetLangCode: string) => {
     if (!activeProject) return;
-    if (!window.confirm(`This will use AI to translate all strings from 'default' to '${targetLangCode}'. Existing translations in this column will be overwritten. Do you want to proceed?`)) {
+
+    const stringsToTranslate = activeProject.resources
+        .filter(r => !r.isArchived && (!r.values[targetLangCode] || r.values[targetLangCode].trim() === ''))
+        .map(r => ({ id: r.id, value: r.values.default || '' }));
+    
+    if (stringsToTranslate.length === 0) {
+        alert(`All strings for '${targetLangCode}' already have translations.`);
+        return;
+    }
+
+    if (!window.confirm(`This will use AI to translate ${stringsToTranslate.length} empty strings from 'default' to '${targetLangCode}'. Existing translations will be preserved. Do you want to proceed?`)) {
       return;
     }
 
@@ -748,7 +763,6 @@ const App: React.FC = () => {
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      const stringsToTranslate = activeProject.resources.map(r => ({ id: r.id, value: r.values.default || '' }));
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",

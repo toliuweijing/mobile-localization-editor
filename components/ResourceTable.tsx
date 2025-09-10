@@ -44,7 +44,10 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
           <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
             <thead className="bg-slate-100 dark:bg-slate-800">
               <tr>
-                <th scope="col" className="w-1/5 px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider sticky left-0 bg-slate-100 dark:bg-slate-800 z-10">
+                <th scope="col" className="w-16 px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider sticky left-0 bg-slate-100 dark:bg-slate-800 z-10">
+                  #
+                </th>
+                <th scope="col" className="w-1/5 px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider sticky left-16 bg-slate-100 dark:bg-slate-800 z-10">
                   String ID
                 </th>
                 <th scope="col" className="w-1/4 px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">
@@ -83,23 +86,33 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-700">
-              {visibleResources.map((resource) => {
+              {visibleResources.map((resource, index) => {
                 let rowClass = 'group transition-colors duration-150';
-                let stickyTdClass = 'px-6 py-4 whitespace-nowrap text-sm font-mono text-blue-600 dark:text-blue-400 break-all sticky left-0 z-10';
-
+                
+                const rowNumberBaseClasses = 'px-4 py-4 whitespace-nowrap text-sm text-center font-medium text-slate-500 dark:text-slate-400 sticky left-0 z-10';
+                const stringIdBaseClasses = 'px-6 py-4 whitespace-nowrap text-sm font-mono text-blue-600 dark:text-blue-400 break-all sticky left-16 z-10';
+                
+                let bgClasses = '';
+                
                 if (resource.status === 'new') {
                     rowClass += ' bg-green-50 dark:bg-green-900/30';
-                    stickyTdClass += ' bg-green-50 dark:bg-green-900/30 group-hover:bg-green-100 dark:group-hover:bg-green-900/50';
+                    bgClasses = 'bg-green-50 dark:bg-green-900/30 group-hover:bg-green-100 dark:group-hover:bg-green-900/50';
                 } else if (resource.status === 'updated') {
                     rowClass += ' bg-yellow-50 dark:bg-yellow-900/30';
-                    stickyTdClass += ' bg-yellow-50 dark:bg-yellow-900/30 group-hover:bg-yellow-100 dark:group-hover:bg-yellow-900/50';
+                    bgClasses = 'bg-yellow-50 dark:bg-yellow-900/30 group-hover:bg-yellow-100 dark:group-hover:bg-yellow-900/50';
                 } else {
                     rowClass += ' hover:bg-slate-50 dark:hover:bg-slate-800/50';
-                    stickyTdClass += ' bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50';
+                    bgClasses = 'bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50';
                 }
+
+                const rowNumberTdClass = `${rowNumberBaseClasses} ${bgClasses}`;
+                const stickyTdClass = `${stringIdBaseClasses} ${bgClasses}`;
 
                 return (
                   <tr key={resource.id} className={rowClass}>
+                    <td className={rowNumberTdClass}>
+                      {index + 1}
+                    </td>
                     <td className={stickyTdClass}>
                       <div className="flex items-center justify-between gap-4">
                           <span className="truncate" title={resource.id}>{resource.id}</span>
