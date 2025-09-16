@@ -15,6 +15,8 @@ import LanguageMappingModal from './components/LanguageMappingModal';
 import UploadIcon from './components/icons/UploadIcon';
 import CheckIcon from './components/icons/CheckIcon';
 
+declare var XLSX: any;
+
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -149,57 +151,33 @@ const App: React.FC = () => {
     return parsedResources;
   };
 
-  const parseCsvRow = (row: string): string[] => {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < row.length; i++) {
-        const char = row[i];
-        if (char === '"') {
-            if (inQuotes && row[i + 1] === '"') {
-                current += '"';
-                i++; // Skip the second quote
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (char === ',' && !inQuotes) {
-            result.push(current.trim());
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    result.push(current.trim());
-    return result.map(val => {
-        if (val.startsWith('"') && val.endsWith('"')) {
-            return val.slice(1, -1).replace(/""/g, '"');
-        }
-        return val;
-    });
-  };
+  const parseXlsxContent = (data: ArrayBuffer): { headers: string[], rows: { [key: string]: string }[] } => {
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) throw new Error("XLSX file contains no sheets.");
 
-  const parseCsvContent = (csvString: string): { headers: string[], rows: { [key: string]: string }[] } => {
-    const lines = csvString.replace(/\r\n/g, '\n').split('\n');
-    if (lines.length < 1) return { headers: [], rows: [] };
+    const worksheet = workbook.Sheets[sheetName];
+    const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+    
+    if (rowsAsArrays.length < 1) return { headers: [], rows: [] };
 
-    const headers = parseCsvRow(lines[0]);
+    const headers = rowsAsArrays[0].map(String);
     if (headers.indexOf('id') === -1) {
-        throw new Error("CSV must contain an 'id' column.");
+        throw new Error("XLSX sheet must contain an 'id' column header.");
     }
 
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const values = parseCsvRow(line);
-        if (values.length !== headers.length) continue; // Skip malformed rows
-        const rowObject = headers.reduce((obj, header, index) => {
-            obj[header] = values[index];
-            return obj;
-        }, {} as { [key: string]: string });
-        rows.push(rowObject);
-    }
-    return { headers, rows };
+    const rowsAsObjects = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+    // Ensure all values are strings for consistency, as sheet_to_json can infer types
+    const stringifiedRows = rowsAsObjects.map((row: any) => {
+        const newRow: {[key: string]: string} = {};
+        for (const header of headers) {
+             newRow[header] = String(row[header] ?? '');
+        }
+        return newRow;
+    });
+
+    return { headers, rows: stringifiedRows };
   };
 
   const handleInitialFileUpload = useCallback((file: File) => {
@@ -283,17 +261,15 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const handleTranslationFileUpdate = (file: File) => {
+  const handleSpreadsheetFileUpdate = (file: File) => {
      if (!activeProject) return;
     
     const reader = new FileReader();
     reader.onload = (event) => {
         try {
-            const content = event.target?.result as string;
-            // Phase 1: CSV Header Analysis
-            const lines = content.replace(/\r\n/g, '\n').split('\n');
-            if (lines.length < 1) throw new Error("CSV is empty.");
-            const headers = parseCsvRow(lines[0]);
+            const content = event.target?.result as ArrayBuffer;
+            // Phase 1: Header Analysis
+            const { headers } = parseXlsxContent(content);
             
             const newLanguages: string[] = [];
             const unrecognizedColumns: string[] = [];
@@ -316,7 +292,7 @@ const App: React.FC = () => {
                 return; // Pause execution, wait for user input from modal
             }
             
-            // If CSV has no new/unrecognized languages, proceed directly.
+            // If XLSX has no new/unrecognized languages, proceed directly.
             handleProcessFileUpdate(file, {});
 
         } catch (e: unknown) {
@@ -330,7 +306,7 @@ const App: React.FC = () => {
     reader.onerror = () => {
         setError('Failed to read the update file.');
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }
 
   const handleProcessFileUpdate = (file: File, resolutions: LanguageMappingResolution) => {
@@ -338,12 +314,12 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const content = event.target?.result as string;
+        const content = event.target?.result;
         let newResources: StringResource[];
-        const isCsv = file.name.endsWith('.csv');
+        const isSpreadsheet = file.name.endsWith('.xlsx');
 
-        if (isCsv) {
-            const { headers, rows } = parseCsvContent(content);
+        if (isSpreadsheet) {
+            const { headers, rows } = parseXlsxContent(content as ArrayBuffer);
             const headerMap: { [key: string]: string } = {}; // Maps original header to its purpose (e.g., 'value_fr')
             
             for(const header of headers) {
@@ -373,8 +349,8 @@ const App: React.FC = () => {
             }).filter((r): r is StringResource => r !== null);
         } else {
             newResources = activeProject.platform === 'android' 
-                ? parseXmlContent(content) 
-                : parseIosStringsContent(content);
+                ? parseXmlContent(content as string) 
+                : parseIosStringsContent(content as string);
         }
 
         const oldResourcesMap = new Map(activeProject.resources.map(r => [r.id, r]));
@@ -387,8 +363,8 @@ const App: React.FC = () => {
             handledNewIds.add(newResource.id);
             const oldResource = oldResourcesMap.get(newResource.id);
             if (!oldResource || oldResource.isArchived) { // Treat archived as new
-                // If update is from CSV, do not add new strings. Source file is source of truth.
-                if (!isCsv) {
+                // If update is from a spreadsheet, do not add new strings. Source file is source of truth.
+                if (!isSpreadsheet) {
                     added.push(newResource);
                 }
             } else {
@@ -396,7 +372,7 @@ const App: React.FC = () => {
                 let contextChange: UpdateDiff['contextChange'] = null;
                 
                 let languagesToCompare: Set<string>;
-                if (isCsv) {
+                if (isSpreadsheet) {
                     languagesToCompare = new Set([...Object.keys(oldResource.values), ...Object.keys(newResource.values)]);
                 } else {
                     languagesToCompare = new Set(Object.keys(newResource.values));
@@ -416,7 +392,7 @@ const App: React.FC = () => {
 
                 if (valueChanges.length > 0 || contextChange) {
                     const updateDiff: UpdateDiff = { id: newResource.id, valueChanges, contextChange };
-                    if (!isCsv) {
+                    if (!isSpreadsheet) {
                         updateDiff.newSourceText = newResource.sourceText;
                     }
                     updated.push(updateDiff);
@@ -424,8 +400,8 @@ const App: React.FC = () => {
             }
         }
 
-        const removed = isCsv 
-            ? [] // If it's a CSV, never calculate removals. Source file is source of truth.
+        const removed = isSpreadsheet
+            ? [] // If it's a spreadsheet, never calculate removals. Source file is source of truth.
             : activeProject.resources.filter(r => !handledNewIds.has(r.id) && !r.isArchived);
 
         if (added.length === 0 && updated.length === 0 && removed.length === 0) {
@@ -446,7 +422,12 @@ const App: React.FC = () => {
     reader.onerror = () => {
         setError('Failed to read the update file.');
     };
-    reader.readAsText(file);
+    
+    if (file.name.endsWith('.xlsx')) {
+        reader.readAsArrayBuffer(file);
+    } else {
+        reader.readAsText(file);
+    }
   };
   
   const handleApplyMerge = (resolutions: MergeResolutions) => {
@@ -615,27 +596,26 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportCSV = () => {
+  const handleExportXLSX = () => {
     if (!activeProject) return;
     const headers = ['id', 'context', ...activeProject.languages.map(l => `value_${l}`)];
-    const escapeCsvField = (field: string) => {
-      let escaped = (field || '').replace(/"/g, '""');
-      if (escaped.includes(',') || escaped.includes('\n') || escaped.includes('"')) {
-        escaped = `"${escaped}"`;
-      }
-      return escaped;
-    };
-    const csvRows = [
-      headers.join(','),
-      ...activeProject.resources.filter(r => !r.isArchived).map(r => 
-        [
-            escapeCsvField(r.id), 
-            escapeCsvField(r.context), 
-            ...activeProject.languages.map(l => escapeCsvField(r.values[l] || ''))
-        ].join(',')
-      )
-    ];
-    triggerDownload(csvRows.join('\n'), 'text/csv;charset=utf-8;', `${activeProject.fileName?.replace(/\.(xml|strings)$/, '')}.csv`);
+    const data = activeProject.resources.filter(r => !r.isArchived).map(r => {
+        const row: {[key: string]: string} = {
+            id: r.id,
+            context: r.context,
+        };
+        activeProject.languages.forEach(lang => {
+            row[`value_${lang}`] = r.values[lang] || '';
+        });
+        return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Translations');
+    
+    const fileName = `${activeProject.fileName?.replace(/\.(xml|strings)$/, '')}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
   };
 
   const handleExportMD = () => {
@@ -952,7 +932,7 @@ const App: React.FC = () => {
                           <button
                             onClick={() => translationUpdateFileInputRef.current?.click()}
                             className="flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors"
-                            title="Update translations from a CSV file"
+                            title="Update translations from an XLSX file"
                           >
                             <UploadIcon className="w-5 h-5 mr-2" />
                             Update Translation
@@ -961,10 +941,10 @@ const App: React.FC = () => {
                             type="file"
                             ref={translationUpdateFileInputRef}
                             className="hidden"
-                            accept=".csv"
+                            accept=".xlsx"
                             onChange={(e) => {
                                 if (e.target.files && e.target.files.length > 0) {
-                                    handleTranslationFileUpdate(e.target.files[0]);
+                                    handleSpreadsheetFileUpdate(e.target.files[0]);
                                 }
                                 if (e.target) e.target.value = '';
                             }}
@@ -994,9 +974,9 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex flex-col gap-2">
-                                <h4 className="font-medium text-slate-600 dark:text-slate-300">Export CSV</h4>
-                                <button onClick={handleExportCSV} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors">
-                                    Download .csv
+                                <h4 className="font-medium text-slate-600 dark:text-slate-300">Export Spreadsheet</h4>
+                                <button onClick={handleExportXLSX} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600 dark:hover:bg-slate-600 transition-colors">
+                                    Download .xlsx
                                 </button>
                             </div>
                             <div className="flex flex-col gap-2">

@@ -27,8 +27,8 @@ This project is currently in an early alpha stage. The initial focus was on buil
 *   **Project-Based Workspace:** Don't lose your work. Create multiple projects, save your progress, and pick up right where you left off. All data is saved in your browser.
 *   **In-Place Editing:** A clean, intuitive table interface that allows you to edit string IDs, context comments, and translated values directly.
 *   **AI-Powered Translation:** Use Google Gemini to translate your entire file into a new language with a single click, intelligently preserving formatting placeholders.
-*   **Safe File Updates:** Update your project from a newer version of your source file or a CSV from your translation team. A powerful Merge Review modal gives you a visual diff and full control over what gets changed.
-*   **Multiple Export Options:** Export your work back to native platform files, or as CSV or Markdown for collaboration and documentation.
+*   **Safe File Updates:** Update your project from a newer version of your source file or an XLSX from your translation team. A powerful Merge Review modal gives you a visual diff and full control over what gets changed.
+*   **Multiple Export Options:** Export your work back to native platform files, or as XLSX or Markdown for collaboration and documentation.
 *   **Offline-First:** The app works entirely in your browser. Your files are never uploaded to a server, and you can use it even without an internet connection (AI features excluded).
 
 ## 🤔 Why?
