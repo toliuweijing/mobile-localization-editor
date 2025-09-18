@@ -22,6 +22,7 @@ interface ResourceTableProps {
 
 const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onUpdateResource, onRemoveLanguage, onAiTranslate, aiTranslating, platform, onAcknowledgeChange }) => {
   const [selectedResource, setSelectedResource] = useState<StringResource | null>(null);
+  const [tooltip, setTooltip] = useState<{ content: string; x: number; y: number } | null>(null);
 
   const visibleResources = useMemo(() => resources.filter(r => !r.isArchived), [resources]);
 
@@ -37,8 +38,44 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
     }
   };
 
+  const getTooltipText = (previousValue: string | undefined) => {
+    if (previousValue === undefined) return 'Previously: (empty)';
+    if (previousValue === '') return 'Previously: ""';
+    return `Previously: "${previousValue}"`;
+  };
+
+  const showTooltip = (e: React.MouseEvent, content: string | undefined) => {
+    if (content) {
+      setTooltip({ content, x: e.clientX, y: e.clientY });
+    }
+  };
+
+  const hideTooltip = () => {
+    setTooltip(null);
+  };
+
+  const moveTooltip = (e: React.MouseEvent) => {
+    if (tooltip) {
+      setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+    }
+  };
+
+
   return (
     <>
+      {tooltip && (
+        <div
+          className="fixed z-[9999] px-3 py-1.5 text-sm font-medium text-white bg-slate-900/80 dark:bg-slate-700/80 backdrop-blur-sm rounded-md shadow-lg"
+          style={{
+            top: tooltip.y + 15,
+            left: tooltip.x + 15,
+            pointerEvents: 'none',
+          }}
+          role="tooltip"
+        >
+          {tooltip.content}
+        </div>
+      )}
       <div className="w-full mt-6 overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg shadow-md">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
@@ -93,11 +130,12 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
                 const stringIdBaseClasses = 'px-6 py-4 whitespace-nowrap text-sm font-mono text-blue-600 dark:text-blue-400 break-all sticky left-16 z-10';
                 
                 let bgClasses = '';
-                
-                if (resource.status === 'new') {
+                const updatedFields = new Set(resource.status?.type === 'updated' ? resource.status.updatedFields : []);
+
+                if (resource.status?.type === 'new') {
                     rowClass += ' bg-green-50 dark:bg-green-900/30';
                     bgClasses = 'bg-green-50 dark:bg-green-900/30 group-hover:bg-green-100 dark:group-hover:bg-green-900/50';
-                } else if (resource.status === 'updated') {
+                } else if (resource.status?.type === 'updated') {
                     rowClass += ' bg-yellow-50 dark:bg-yellow-900/30';
                     bgClasses = 'bg-yellow-50 dark:bg-yellow-900/30 group-hover:bg-yellow-100 dark:group-hover:bg-yellow-900/50';
                 } else {
@@ -107,6 +145,15 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
 
                 const rowNumberTdClass = `${rowNumberBaseClasses} ${bgClasses}`;
                 const stickyTdClass = `${stringIdBaseClasses} ${bgClasses}`;
+                
+                const isContextUpdated = updatedFields.has('context');
+                const isContextNewlyAdded = isContextUpdated && resource.status?.type === 'updated' && (resource.status.previousState?.context === undefined || resource.status.previousState.context === '');
+
+                const contextTooltip = isContextUpdated && resource.status?.type === 'updated'
+                    ? getTooltipText(resource.status.previousState?.context)
+                    : undefined;
+                
+                const contextCellClasses = `relative px-6 py-4 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-400 cursor-text focus:outline-blue-500 focus:outline-2 focus:outline-offset-[-2px] rounded-md ${isContextUpdated ? (isContextNewlyAdded ? 'bg-green-100 dark:bg-green-800/50' : 'bg-yellow-100 dark:bg-yellow-800/50') : ''}`;
 
                 return (
                   <tr key={resource.id} className={rowClass}>
@@ -142,21 +189,40 @@ const ResourceTable: React.FC<ResourceTableProps> = ({ resources, languages, onU
                       contentEditable
                       suppressContentEditableWarning={true}
                       onBlur={(e) => handleBlur(e, resource.id, 'context', '')}
-                      className="px-6 py-4 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-400 cursor-text focus:outline-blue-500 focus:outline-2 focus:outline-offset-[-2px] rounded-md"
+                      onMouseEnter={(e) => showTooltip(e, contextTooltip)}
+                      onMouseLeave={hideTooltip}
+                      onMouseMove={moveTooltip}
+                      className={contextCellClasses}
                     >
+                      {isContextUpdated && <span className={`absolute top-1.5 left-1.5 w-1.5 h-1.5 rounded-full ${isContextNewlyAdded ? 'bg-green-500' : 'bg-blue-500'}`} aria-hidden="true"></span>}
                       {resource.context}
                     </td>
-                    {languages.map(lang => (
-                      <td
-                        key={lang}
-                        contentEditable
-                        suppressContentEditableWarning={true}
-                        onBlur={(e) => handleBlur(e, resource.id, 'value', lang)}
-                        className="px-6 py-4 whitespace-pre-wrap text-sm text-slate-900 dark:text-slate-100 font-medium cursor-text focus:outline-blue-500 focus:outline-2 focus:outline-offset-[-2px] rounded-md"
-                      >
-                        {resource.values[lang] || ''}
-                      </td>
-                    ))}
+                    {languages.map(lang => {
+                      const isValueUpdated = updatedFields.has(lang);
+                      const isValueNewlyAdded = isValueUpdated && resource.status?.type === 'updated' && (resource.status.previousState?.values?.[lang] === undefined || resource.status.previousState.values[lang] === '');
+
+                      const valueTooltip = isValueUpdated && resource.status?.type === 'updated'
+                        ? getTooltipText(resource.status.previousState?.values?.[lang])
+                        : undefined;
+                      
+                      const valueCellClasses = `relative px-6 py-4 whitespace-pre-wrap text-sm text-slate-900 dark:text-slate-100 font-medium cursor-text focus:outline-blue-500 focus:outline-2 focus:outline-offset-[-2px] rounded-md ${isValueUpdated ? (isValueNewlyAdded ? 'bg-green-100 dark:bg-green-800/50' : 'bg-yellow-100 dark:bg-yellow-800/50') : ''}`;
+
+                      return (
+                        <td
+                          key={lang}
+                          contentEditable
+                          suppressContentEditableWarning={true}
+                          onBlur={(e) => handleBlur(e, resource.id, 'value', lang)}
+                          onMouseEnter={(e) => showTooltip(e, valueTooltip)}
+                          onMouseLeave={hideTooltip}
+                          onMouseMove={moveTooltip}
+                          className={valueCellClasses}
+                        >
+                          {isValueUpdated && <span className={`absolute top-1.5 left-1.5 w-1.5 h-1.5 rounded-full ${isValueNewlyAdded ? 'bg-green-500' : 'bg-blue-500'}`} aria-hidden="true"></span>}
+                          {resource.values[lang] || ''}
+                        </td>
+                      )
+                    })}
                   </tr>
                 )
               })}

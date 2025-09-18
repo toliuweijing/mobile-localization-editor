@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
-import { StringResource, Project, Platform, MergeComparison, MergeResolutions, UpdateDiff, ValueChange, LanguageMappingRequest, LanguageMappingResolution } from './types';
+import { StringResource, Project, Platform, MergeComparison, MergeResolutions, UpdateDiff, ValueChange, LanguageMappingRequest, LanguageMappingResolution, SheetSelectionRequest } from './types';
 import { getAllProjects, saveProject, deleteProject, clearAllProjects, bulkSaveProjects } from './services/database';
 import FileUpload from './components/FileUpload';
 import ResourceTable from './components/ResourceTable';
@@ -12,6 +12,7 @@ import MenuIcon from './components/icons/MenuIcon';
 import RefreshIcon from './components/icons/RefreshIcon';
 import MergeReviewModal from './components/MergeReviewModal';
 import LanguageMappingModal from './components/LanguageMappingModal';
+import SheetSelectionModal from './components/SheetSelectionModal';
 import UploadIcon from './components/icons/UploadIcon';
 import CheckIcon from './components/icons/CheckIcon';
 
@@ -25,6 +26,7 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mergeComparison, setMergeComparison] = useState<MergeComparison | null>(null);
   const [languageMappingRequest, setLanguageMappingRequest] = useState<LanguageMappingRequest | null>(null);
+  const [sheetSelectionRequest, setSheetSelectionRequest] = useState<SheetSelectionRequest | null>(null);
   const sourceUpdateFileInputRef = useRef<HTMLInputElement>(null);
   const translationUpdateFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,7 +36,7 @@ const App: React.FC = () => {
   
   const hasPendingChanges = useMemo(() => {
     if (!activeProject) return false;
-    return activeProject.resources.some(r => r.status === 'new' || r.status === 'updated');
+    return activeProject.resources.some(r => r.status?.type === 'new' || r.status?.type === 'updated');
   }, [activeProject]);
 
   // Load projects from IndexedDB on initial render
@@ -151,10 +153,14 @@ const App: React.FC = () => {
     return parsedResources;
   };
 
-  const parseXlsxContent = (data: ArrayBuffer): { headers: string[], rows: { [key: string]: string }[] } => {
+  const parseXlsxContent = (data: ArrayBuffer, sheetNameToUse?: string): { headers: string[], rows: { [key: string]: string }[] } => {
     const workbook = XLSX.read(data, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    if (!sheetName) throw new Error("XLSX file contains no sheets.");
+    const sheetName = sheetNameToUse || workbook.SheetNames[0];
+    if (!sheetName || !workbook.SheetNames.includes(sheetName)) {
+        throw new Error(sheetNameToUse 
+            ? `Sheet "${sheetNameToUse}" not found in the XLSX file.`
+            : "XLSX file contains no sheets.");
+    }
 
     const worksheet = workbook.Sheets[sheetName];
     const rowsAsArrays: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
@@ -163,7 +169,7 @@ const App: React.FC = () => {
 
     const headers = rowsAsArrays[0].map(String);
     if (headers.indexOf('id') === -1) {
-        throw new Error("XLSX sheet must contain an 'id' column header.");
+        throw new Error(`XLSX sheet "${sheetName}" must contain an 'id' column header.`);
     }
 
     const rowsAsObjects = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
@@ -261,15 +267,13 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const handleSpreadsheetFileUpdate = (file: File) => {
-     if (!activeProject) return;
-    
+  const processAndAnalyzeSpreadsheet = (file: File, sheetName?: string) => {
+    if (!activeProject) return;
     const reader = new FileReader();
     reader.onload = (event) => {
         try {
             const content = event.target?.result as ArrayBuffer;
-            // Phase 1: Header Analysis
-            const { headers } = parseXlsxContent(content);
+            const { headers } = parseXlsxContent(content, sheetName);
             
             const newLanguages: string[] = [];
             const unrecognizedColumns: string[] = [];
@@ -288,12 +292,11 @@ const App: React.FC = () => {
             }
 
             if (newLanguages.length > 0 || unrecognizedColumns.length > 0) {
-                setLanguageMappingRequest({ newLanguages, unrecognizedColumns, file });
-                return; // Pause execution, wait for user input from modal
+                setLanguageMappingRequest({ newLanguages, unrecognizedColumns, file, sheetName });
+                return;
             }
             
-            // If XLSX has no new/unrecognized languages, proceed directly.
-            handleProcessFileUpdate(file, {});
+            handleProcessFileUpdate(file, {}, sheetName);
 
         } catch (e: unknown) {
             if (e instanceof Error) {
@@ -307,9 +310,55 @@ const App: React.FC = () => {
         setError('Failed to read the update file.');
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleSpreadsheetFileUpdate = (file: File) => {
+     if (!activeProject) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const content = event.target?.result as ArrayBuffer;
+            const workbook = XLSX.read(content, { type: 'array' });
+            const sheetNames = workbook.SheetNames;
+
+            if (sheetNames.length <= 1) {
+                processAndAnalyzeSpreadsheet(file, sheetNames[0]);
+                return;
+            }
+
+            const validSheets = sheetNames.filter(name => {
+                const worksheet = workbook.Sheets[name];
+                const headers: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 'A1:Z1' })[0] || [];
+                return headers.includes('id');
+            });
+            
+            if (validSheets.length === 0) {
+                throw new Error("No sheets with a required 'id' column were found in the workbook.");
+            }
+
+            if (validSheets.length === 1) {
+                processAndAnalyzeSpreadsheet(file, validSheets[0]);
+                return;
+            }
+            
+            setSheetSelectionRequest({ file, sheetNames: validSheets });
+
+        } catch (e: unknown) {
+            if (e instanceof Error) {
+                setError(e.message);
+            } else {
+                setError('An unknown error occurred during sheet analysis.');
+            }
+        }
+    };
+    reader.onerror = () => {
+        setError('Failed to read the update file.');
+    };
+    reader.readAsArrayBuffer(file);
   }
 
-  const handleProcessFileUpdate = (file: File, resolutions: LanguageMappingResolution) => {
+  const handleProcessFileUpdate = (file: File, resolutions: LanguageMappingResolution, sheetName?: string) => {
     if (!activeProject) return;
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -319,7 +368,7 @@ const App: React.FC = () => {
         const isSpreadsheet = file.name.endsWith('.xlsx');
 
         if (isSpreadsheet) {
-            const { headers, rows } = parseXlsxContent(content as ArrayBuffer);
+            const { headers, rows } = parseXlsxContent(content as ArrayBuffer, sheetName);
             const headerMap: { [key: string]: string } = {}; // Maps original header to its purpose (e.g., 'value_fr')
             
             for(const header of headers) {
@@ -455,10 +504,21 @@ const App: React.FC = () => {
                 const existing = resourcesMap.get(update.id);
                 if (existing) {
                     const newValues = { ...existing.values };
+                    const updatedFields: ('context' | string)[] = [];
+                    const previousState: { context?: string, values?: { [langCode: string]: string } } = {};
+                    
                     update.valueChanges.forEach(change => {
                         newValues[change.langCode] = change.newValue;
                         allLangs.add(change.langCode);
+                        updatedFields.push(change.langCode);
+                        if (!previousState.values) previousState.values = {};
+                        previousState.values[change.langCode] = change.oldValue;
                     });
+
+                    if (update.contextChange) {
+                        updatedFields.push('context');
+                        previousState.context = update.contextChange.oldContext;
+                    }
 
                     resourcesMap.set(update.id, {
                         ...existing,
@@ -466,7 +526,11 @@ const App: React.FC = () => {
                         context: update.contextChange ? update.contextChange.newContext : existing.context,
                         sourceText: update.newSourceText || existing.sourceText,
                         isArchived: false,
-                        status: 'updated',
+                        status: {
+                            type: 'updated',
+                            updatedFields,
+                            previousState,
+                        },
                     });
                 }
             }
@@ -474,7 +538,7 @@ const App: React.FC = () => {
         
         // Process additions
         for (const newRes of mergeComparison.added) {
-            resourcesMap.set(newRes.id, { ...newRes, status: 'new' });
+            resourcesMap.set(newRes.id, { ...newRes, status: { type: 'new' } });
             Object.keys(newRes.values).forEach(lang => allLangs.add(lang));
         }
 
@@ -1005,14 +1069,26 @@ const App: React.FC = () => {
               </>
             )}
         </main>
+        {sheetSelectionRequest && (
+            <SheetSelectionModal
+                request={sheetSelectionRequest}
+                onClose={() => setSheetSelectionRequest(null)}
+                onConfirm={(sheetName) => {
+                    const file = sheetSelectionRequest.file;
+                    setSheetSelectionRequest(null);
+                    processAndAnalyzeSpreadsheet(file, sheetName);
+                }}
+            />
+        )}
         {languageMappingRequest && (
             <LanguageMappingModal
                 request={languageMappingRequest}
                 onClose={() => setLanguageMappingRequest(null)}
                 onConfirm={(resolutions) => {
                     const file = languageMappingRequest.file;
+                    const selectedSheet = languageMappingRequest.sheetName;
                     setLanguageMappingRequest(null);
-                    handleProcessFileUpdate(file, resolutions);
+                    handleProcessFileUpdate(file, resolutions, selectedSheet);
                 }}
             />
         )}

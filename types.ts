@@ -4,7 +4,14 @@ export interface StringResource {
   values: { [langCode: string]: string };
   sourceText: string;
   isArchived?: boolean;
-  status?: 'new' | 'updated';
+  status?: {
+    type: 'new' | 'updated';
+    updatedFields?: ('context' | string)[]; // string is langCode
+    previousState?: {
+      context?: string;
+      values?: { [langCode: string]: string };
+    };
+  };
 }
 
 export type Platform = 'android' | 'ios' | null;
@@ -53,8 +60,15 @@ export interface LanguageMappingRequest {
   newLanguages: string[]; // Valid new language codes like 'fr'
   unrecognizedColumns: string[]; // Headers like 'French Translation'
   file: File; // Keep the file handle for processing later
+  sheetName?: string; // Optional: To pass the selected sheet name through
 }
 
 export interface LanguageMappingResolution {
   [unrecognizedColumn: string]: { action: 'map', langCode: string } | { action: 'ignore' };
+}
+
+// For sheet selection
+export interface SheetSelectionRequest {
+  file: File;
+  sheetNames: string[];
 }
